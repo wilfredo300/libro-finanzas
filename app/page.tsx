@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useState } from 'react';
-import { Analytics } from '@vercel/analytics/react';
+import React, { useState, useEffect, useRef } from 'react';
+import Script from 'next/script';
 import {
   Wallet,
   CheckCircle2,
@@ -17,15 +17,32 @@ import {
   Mail,
 } from 'lucide-react';
 
+// ⚠️ REEMPLAZA ESTO CON TU MEASUREMENT ID DE GOOGLE ANALYTICS 4 (formato: G-XXXXXXXXXX)
+const GA_MEASUREMENT_ID = 'G-MSD5VC5FT3';
+
+declare global {
+  interface Window {
+    gtag?: (...args: unknown[]) => void;
+  }
+}
+
+// Envía un evento a Google Analytics 4 (no falla si gtag aún no cargó)
+function gtagEvent(eventName: string, params?: Record<string, string>) {
+  if (typeof window !== 'undefined' && window.gtag) {
+    window.gtag('event', eventName, params);
+  }
+}
+
 export default function LandingPage() {
   const [email, setEmail] = useState('');
   const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent, formSource: 'hero' | 'cierre') => {
     e.preventDefault();
     if (!email) return;
 
     setStatus('loading');
+    gtagEvent('submit_attempt', { form: formSource });
 
     try {
       // ⚠️ REEMPLAZA ESTA URL CON TU ENDPOINT DE FORMSPREE
@@ -38,18 +55,76 @@ export default function LandingPage() {
       if (response.ok) {
         setStatus('success');
         setEmail('');
+        gtagEvent('email_submitted', { form: formSource });
       } else {
         setStatus('error');
+        gtagEvent('submit_error', { form: formSource, reason: 'response_not_ok' });
       }
     } catch {
       setStatus('error');
+      gtagEvent('submit_error', { form: formSource, reason: 'network_error' });
     }
   };
 
+  // Trackea cuándo el usuario hace foco en el campo de correo (primer indicio de interés)
+  const handleEmailFocus = (formSource: 'hero' | 'cierre') => {
+    gtagEvent('email_focus', { form: formSource });
+  };
+
+  // Trackea cuándo el usuario ve cada sección clave del embudo (una sola vez por sección)
+  const problemaRef = useRef<HTMLElement>(null);
+  const solucionRef = useRef<HTMLElement>(null);
+  const negocioRef = useRef<HTMLElement>(null);
+  const cierreRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    const seen = new Set<string>();
+    const sections: { ref: React.RefObject<HTMLElement>; name: string }[] = [
+      { ref: problemaRef, name: 'problema' },
+      { ref: solucionRef, name: 'solucion' },
+      { ref: negocioRef, name: 'negocio' },
+      { ref: cierreRef, name: 'cierre' },
+    ];
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            const match = sections.find((s) => s.ref.current === entry.target);
+            if (match && !seen.has(match.name)) {
+              seen.add(match.name);
+              gtagEvent('section_view', { section: match.name });
+              observer.unobserve(entry.target);
+            }
+          }
+        });
+      },
+      { threshold: 0.4 }
+    );
+
+    sections.forEach((s) => {
+      if (s.ref.current) observer.observe(s.ref.current);
+    });
+
+    return () => observer.disconnect();
+  }, []);
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 font-sans">
-      {/* Vercel Analytics mide las visitas automáticamente */}
-      <Analytics />
+      {/* Google Analytics 4: carga el script y lo inicializa (mide pageviews automáticamente) */}
+      <Script
+        src={`https://www.googletagmanager.com/gtag/js?id=${GA_MEASUREMENT_ID}`}
+        strategy="afterInteractive"
+      />
+      <Script id="ga4-init" strategy="afterInteractive">
+        {`
+          window.dataLayer = window.dataLayer || [];
+          function gtag(){dataLayer.push(arguments);}
+          gtag('js', new Date());
+          gtag('config', '${GA_MEASUREMENT_ID}');
+          window.gtag = gtag;
+        `}
+      </Script>
 
       <nav className="max-w-6xl mx-auto px-6 py-6 flex items-center justify-between">
         <div className="flex items-center gap-2 font-bold text-xl text-slate-900">
@@ -86,7 +161,7 @@ export default function LandingPage() {
               ¡Listo! Te guardamos un cupo para el acceso anticipado.
             </div>
           ) : (
-            <form onSubmit={handleSubmit} className="flex flex-col gap-3">
+            <form onSubmit={(e) => handleSubmit(e, 'hero')} className="flex flex-col gap-3">
               <label htmlFor="email-hero" className="text-sm font-medium text-slate-600 text-left flex items-center gap-1">
                 <Mail className="w-4 h-4" /> Déjanos tu correo y te avisamos apenas abramos cupos
               </label>
@@ -99,6 +174,7 @@ export default function LandingPage() {
                   placeholder="tucorreo@ejemplo.com"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
+                  onFocus={() => handleEmailFocus('hero')}
                   className="w-full pl-12 pr-5 py-4 rounded-2xl border border-slate-200 bg-white text-slate-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-600"
                 />
               </div>
@@ -121,7 +197,7 @@ export default function LandingPage() {
       </section>
 
       {/* --- EL PROBLEMA --- */}
-      <section className="max-w-4xl mx-auto px-6 pb-20 text-center">
+      <section ref={problemaRef} className="max-w-4xl mx-auto px-6 pb-20 text-center">
         <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-900 mb-2">
           "¿En qué se nos fue el dinero?"
         </h2>
@@ -152,7 +228,7 @@ export default function LandingPage() {
       </section>
 
       {/* --- LA SOLUCIÓN --- */}
-      <section className="max-w-4xl mx-auto px-6 pb-12 text-center">
+      <section ref={solucionRef} className="max-w-4xl mx-auto px-6 pb-12 text-center">
         <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-900 mb-10">
           Una forma simple de tener todo claro, juntos.
         </h2>
@@ -231,7 +307,7 @@ export default function LandingPage() {
       </section>
 
       {/* --- GANCHO NEGOCIO --- */}
-      <section className="max-w-5xl mx-auto px-6 py-12">
+      <section ref={negocioRef} className="max-w-5xl mx-auto px-6 py-12">
         <div className="bg-slate-900 text-white rounded-3xl p-8 flex flex-col md:flex-row items-center justify-between gap-6">
           <div>
             <span className="text-xs bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 px-3 py-1 rounded-full font-semibold">
@@ -250,7 +326,7 @@ export default function LandingPage() {
       </section>
 
       {/* --- PRUEBA SOCIAL / CIERRE --- */}
-      <section className="max-w-4xl mx-auto px-6 py-16 text-center">
+      <section ref={cierreRef} className="max-w-4xl mx-auto px-6 py-16 text-center">
         <div className="inline-flex items-center gap-2 bg-indigo-50 text-indigo-700 text-sm px-4 py-2 rounded-full mb-6">
           <Rocket className="w-4 h-4" /> Únete a la lista de espera
         </div>
@@ -268,7 +344,7 @@ export default function LandingPage() {
               ¡Listo! Te guardamos un cupo para el acceso anticipado.
             </div>
           ) : (
-            <form onSubmit={handleSubmit} className="flex flex-col gap-3">
+            <form onSubmit={(e) => handleSubmit(e, 'cierre')} className="flex flex-col gap-3">
               <label htmlFor="email-cierre" className="text-sm font-medium text-slate-600 text-left flex items-center gap-1">
                 <Mail className="w-4 h-4" /> Déjanos tu correo y te avisamos apenas abramos cupos
               </label>
@@ -281,6 +357,7 @@ export default function LandingPage() {
                   placeholder="tucorreo@ejemplo.com"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
+                  onFocus={() => handleEmailFocus('cierre')}
                   className="w-full pl-12 pr-5 py-4 rounded-2xl border border-slate-200 bg-white text-slate-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-600"
                 />
               </div>
