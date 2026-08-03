@@ -79,7 +79,7 @@ export default function LandingPage() {
 
   useEffect(() => {
     const seen = new Set<string>();
-    const sections: { ref: React.RefObject<HTMLElement>; name: string }[] = [
+    const sections: { ref: React.RefObject<HTMLElement | null>; name: string }[] = [
       { ref: problemaRef, name: 'problema' },
       { ref: solucionRef, name: 'solucion' },
       { ref: negocioRef, name: 'negocio' },
